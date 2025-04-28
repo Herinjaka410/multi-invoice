@@ -1,0 +1,18 @@
+[
+  {
+    "key": "local_1.pdf",
+    "name": "9df88234-dd1e-4db3-b7c1-d20c0610817b.pdf",
+    "date": "2025-01-15",
+    "type": "pdf",
+    "local": true,
+    "url": "/s3bucket/9df88234-dd1e-4db3-b7c1-d20c0610817b.pdf"
+  },
+  {
+    "key": "local_2.png",
+    "name": "image_2025_03_18T08_02_44_823Z.png",
+    "date": "2025-01-16",
+    "type": "image",
+    "local": true,
+    "url": "/s3bucket/image_2025_03_18T08_02_44_823Z.png"
+  }
+]
