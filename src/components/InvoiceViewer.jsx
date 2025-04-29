@@ -1,11 +1,22 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Document, Page, pdfjs } from 'react-pdf';
+import 'react-pdf/dist/Page/AnnotationLayer.css';
+import 'react-pdf/dist/Page/TextLayer.css';
 import './InvoiceViewer.css';
+import workerSrc from 'pdfjs-dist/build/pdf.worker.min.js';
+
+// Configure PDF.js worker
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.js',
+  import.meta.url,
+).toString();
 
 const InvoiceViewer = ({ fileUrl, fileName, fileType }) => {
   const [zoomLevel, setZoomLevel] = useState(100);
   const [displayUrl, setDisplayUrl] = useState('');
   const [pdfLoadError, setPdfLoadError] = useState(false);
   const [numPages, setNumPages] = useState(null);
+  const [pageNumber, setPageNumber] = useState(1);
   const pdfContainerRef = useRef(null);
 
   useEffect(() => {
@@ -16,23 +27,14 @@ const InvoiceViewer = ({ fileUrl, fileName, fileType }) => {
       return;
     }
 
-    const preparePdfUrl = (url) => {
-      if (fileType === 'pdf') {
-        if (url.startsWith('http')) {
-          return `${url}#toolbar=0&navpanes=0&scrollbar=0`;
-        }
-        return url;
-      }
+    const prepareUrl = (url) => {
+      // Pour les PDF, on utilise l'URL directement
       return url;
     };
 
-    if (fileUrl.startsWith('/')) {
-      setDisplayUrl(preparePdfUrl(fileUrl));
-    } 
-    else if (fileUrl.startsWith('http')) {
-      setDisplayUrl(preparePdfUrl(fileUrl));
-    }
-    else if (fileUrl instanceof Blob) {
+    if (fileUrl.startsWith('/') || fileUrl.startsWith('http') || fileUrl.startsWith('blob')) {
+      setDisplayUrl(prepareUrl(fileUrl));
+    } else if (fileUrl instanceof Blob) {
       const objectUrl = URL.createObjectURL(fileUrl);
       setDisplayUrl(objectUrl);
       
@@ -40,47 +42,63 @@ const InvoiceViewer = ({ fileUrl, fileName, fileType }) => {
     }
   }, [fileUrl, fileType]);
 
-  const getSafeUrl = () => {
-    if (!displayUrl) return null;
-    return displayUrl;
+  const onDocumentLoadSuccess = ({ numPages }) => {
+    setNumPages(numPages);
+    setPageNumber(1);
   };
 
-  const safeUrl = getSafeUrl();
-
-  const handlePdfError = () => {
+  const onDocumentLoadError = (error) => {
+    console.error('PDF load error:', error);
     setPdfLoadError(true);
   };
 
+  const changePage = (offset) => {
+    setPageNumber(prevPageNumber => Math.max(1, Math.min(prevPageNumber + offset, numPages)));
+  };
+
   const renderPdfViewer = () => {
-    // Solution 1: Iframe (meilleure compatibilité)
     return (
-      <div style={{ width: '100%', height: '100%', overflow: 'auto' }}>
-        <iframe
-          src={`${safeUrl}#toolbar=0&navpanes=0`}
-          title={`PDF - ${fileName}`}
-          style={{
-            width: `${zoomLevel}%`,
-            height: `${zoomLevel}%`,
-            border: 'none',
-            transform: `scale(${zoomLevel / 100})`,
-            transformOrigin: '0 0'
-          }}
-          onError={handlePdfError}
+      <div className="pdf-viewer-container">
+        <Document
+          file={displayUrl}
+          onLoadSuccess={onDocumentLoadSuccess}
+          onLoadError={onDocumentLoadError}
+          loading={<div>Chargement du PDF...</div>}
+          error={<div>Erreur de chargement du PDF</div>}
         >
-          <div className="pdf-fallback">
-            <p>Votre navigateur ne supporte pas l'affichage des PDF.</p>
-            <a href={safeUrl} download={fileName || 'document.pdf'}>
-              Télécharger le PDF
-            </a>
+          <Page 
+            pageNumber={pageNumber} 
+            width={pdfContainerRef.current?.clientWidth * (zoomLevel / 100)}
+            renderTextLayer={false}
+            renderAnnotationLayer={false}
+          />
+        </Document>
+        {numPages > 1 && (
+          <div className="pdf-navigation">
+            <button 
+              onClick={() => changePage(-1)} 
+              disabled={pageNumber <= 1}
+            >
+              Précédent
+            </button>
+            <span>
+              Page {pageNumber} sur {numPages}
+            </span>
+            <button 
+              onClick={() => changePage(1)} 
+              disabled={pageNumber >= numPages}
+            >
+              Suivant
+            </button>
           </div>
-        </iframe>
+        )}
       </div>
     );
   };
 
   return (
     <div className="invoice-viewer-container">
-      {safeUrl ? (
+      {displayUrl ? (
         <>
           <div className="viewer-controls">
             <div className="zoom-controls">
@@ -97,7 +115,10 @@ const InvoiceViewer = ({ fileUrl, fileName, fileType }) => {
             ref={pdfContainerRef}
             style={{ 
               height: `calc(100vh - 60px)`,
-              overflow: 'auto'
+              overflow: 'auto',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center'
             }}
           >
             {fileType === 'pdf' ? (
@@ -105,7 +126,7 @@ const InvoiceViewer = ({ fileUrl, fileName, fileType }) => {
                 <div className="pdf-error">
                   <p>Impossible d'afficher le PDF.</p>
                   <a 
-                    href={safeUrl} 
+                    href={displayUrl} 
                     download={fileName || 'document.pdf'}
                     className="download-link"
                   >
@@ -117,7 +138,7 @@ const InvoiceViewer = ({ fileUrl, fileName, fileType }) => {
               )
             ) : (
               <img 
-                src={safeUrl} 
+                src={displayUrl} 
                 alt={`Preview - ${fileName}`}
                 style={{ 
                   maxWidth: '100%', 

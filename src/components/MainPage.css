@@ -4,7 +4,7 @@
     position: static !important;
     display: flex;
     height: 100vh;
-    font-family: Arial, sans-serif;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     background-color: #f5f5f5;
   }
   
@@ -41,6 +41,7 @@
     background-color: white;
     display: flex;
     flex-direction: column;
+    overflow-y: auto;
   }
   
   h1 {
@@ -60,6 +61,7 @@
   .file-list-container {
     max-height: 70vh;
     overflow-y: auto;
+    margin-top: 10px;
   }
   
   .local-badge {
@@ -95,7 +97,7 @@
   }
   
   .file-item.selected {
-    background-color: #e0e0ff;
+    background-color: #2980b9;
     font-weight: bold;
   }
   
@@ -135,7 +137,11 @@
   }
   
   .file-name {
-    flex-grow: 1;
+    font-weight: bold;
+    margin-bottom: 5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   
   .file-date {
@@ -166,7 +172,9 @@
     padding: 10px 15px;
     border-radius: 4px;
     cursor: pointer;
-    margin-top: 20px;
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
   }
   
   .loading, .error, .no-file-selected {
@@ -179,6 +187,41 @@
     color: #cc0000;
   }
   
+  .file-details {
+    margin-top: 15px;
+  }
+  
+  .file-details p {
+    margin: 5px 0;
+  }
+  
+  .loading-spinner {
+    text-align: center;
+    padding: 20px;
+  }
+  
+  .no-files, .no-selection {
+    text-align: center;
+    padding: 30px;
+    color: #7f8c8d;
+  }
+  
+  .error-message {
+    text-align: center;
+    padding: 20px;
+    color: #e74c3c;
+  }
+  
+  .error-message button {
+    margin-top: 10px;
+    padding: 8px 15px;
+    background-color: #e74c3c;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
   .date-selector-container {
     display: flex;
     justify-content: space-between;
@@ -187,19 +230,53 @@
   }
   
   .date-selector {
+    width: 100%;
+    padding: 8px;
+    margin-top: 5px;
     padding: 5px 10px;
     border-radius: 4px;
-    border: 1px solid #ddd;
+    border: none;
     background-color: white;
+  }
+
+  .upload-local-btn {
+    display: block;
+    background-color: #3498db;
+    color: white;
+    padding: 10px 15px;
+    border-radius: 4px;
+    text-align: center;
+    margin-bottom: 20px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+  }
+  
+  .upload-local-btn:hover {
+    background-color: #2980b9;
+  }
+  
+  .file-meta {
+    display: flex;
+    gap: 10px;
+    font-size: 0.8em;
+    color: #bdc3c7;
   }
   
   .file-type {
-    font-size: 0.75rem;
-    color: #666;
-    background-color: #f0f0f0;
     padding: 2px 5px;
     border-radius: 3px;
-    margin-left: 8px;
+    font-size: 0.7em;
+    text-transform: uppercase;
+  }
+  
+  .file-type.pdf {
+    background-color: #e74c3c;
+    color: white;
+  }
+  
+  .file-type.image {
+    background-color: #2ecc71;
+    color: white;
   }
 
   .processed-badge {
@@ -229,6 +306,19 @@
     transition: background-color 0.3s;
   }
   
+  .primary-button, .secondary-button {
+    padding: 10px 15px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+  }
+
+  .primary-button:disabled {
+    background-color: #95a5a6;
+    cursor: not-allowed;
+  }
+
   .primary-button:hover {
     background-color: #45a049;
   }
@@ -282,4 +372,37 @@
     color: #666;
     margin-left: 8px;
     font-style: italic;
+  }
+  .sync-button {
+    background-color: #ff9900;
+    color: white;
+    padding: 10px 15px;
+    border: none;
+    border-radius: 4px;
+    margin: 10px 0;
+    cursor: pointer;
+    font-weight: bold;
+    width: 100%;
+  }
+  
+  .sync-button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+  }
+  
+  .sync-message {
+    padding: 10px;
+    margin: 10px 0;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  
+  .sync-message.success {
+    background-color: #d4edda;
+    color: #155724;
+  }
+  
+  .sync-message.error {
+    background-color: #f8d7da;
+    color: #721c24;
   }

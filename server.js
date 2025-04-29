@@ -1,126 +1,159 @@
+require('dotenv').config();
 const express = require('express');
-const bodyParser = require('body-parser');
-const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const cors = require('cors');
+const { S3Client, ListObjectsV2Command, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const app = express();
-const PORT = 3001;
+const PORT = 5000;
 
-// Middleware
-app.use(cors());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-
-// Configuration des dossiers
-const DATA_DIR = path.join(__dirname, 'data');
-const PUBLIC_DIR = path.join(__dirname, '../public');
-const S3BUCKET_DIR = path.join(PUBLIC_DIR, 's3bucket');
-
-// Création des dossiers s'ils n'existent pas
-[DATA_DIR, PUBLIC_DIR, S3BUCKET_DIR].forEach(dir => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+// Configuration AWS S3 v3
+const s3Client = new S3Client({
+  region: process.env.REACT_APP_AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.REACT_APP_AWS_ACCESS_KEY,
+    secretAccessKey: process.env.REACT_APP_AWS_SECRET_KEY
   }
 });
 
-// Middleware pour servir les fichiers statiques
-app.use('/s3bucket', express.static(S3BUCKET_DIR));
+// Middleware
+app.use(cors());
+app.use(express.json());
 
-// API Routes
+// Dossier de stockage local
+const FILES_DIR = path.join(__dirname, 'public', 's3bucket');
+
+// Vérification/Création du dossier
+if (!fs.existsSync(FILES_DIR)) {
+  fs.mkdirSync(FILES_DIR, { recursive: true });
+}
+
+// Route pour la synchronisation S3 (version SDK v3)
+app.post('/api/sync-s3', async (req, res) => {
+  try {
+    const s3Params = {
+      Bucket: 'photonasync-datcorp',
+      Prefix: 'data/768327198/'
+    };
+
+    const command = new ListObjectsV2Command(s3Params);
+    const s3Data = await s3Client.send(command);
+
+    if (!s3Data.Contents || s3Data.Contents.length === 0) {
+      return res.status(404).json({ success: false, message: 'Aucun fichier trouvé sur S3' });
+    }
+
+    const downloadPromises = s3Data.Contents
+      .filter(item => /\.(pdf|jpg|jpeg|png)$/i.test(item.Key))
+      .map(async item => {
+        const fileName = path.basename(item.Key);
+        const localPath = path.join(FILES_DIR, fileName);
+
+        if (!fs.existsSync(localPath)) {
+          const getObjectCommand = new GetObjectCommand({
+            Bucket: s3Params.Bucket,
+            Key: item.Key
+          });
+
+          const response = await s3Client.send(getObjectCommand);
+          const fileData = await streamToBuffer(response.Body);
+          fs.writeFileSync(localPath, fileData);
+          return { name: fileName, status: 'downloaded' };
+        }
+        return { name: fileName, status: 'already_exists' };
+      });
+
+    const results = await Promise.all(downloadPromises);
+    const newFiles = results.filter(r => r.status === 'downloaded');
+
+    res.json({
+      success: true,
+      message: `Synchronisation réussie. ${newFiles.length} nouveaux fichiers.`,
+      details: results
+    });
+
+  } catch (error) {
+    console.error('Erreur de synchronisation S3:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Échec de la synchronisation',
+      error: error.message
+    });
+  }
+});
+
+// Helper function to convert stream to buffer
+async function streamToBuffer(stream) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    stream.on('data', chunk => chunks.push(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(Buffer.concat(chunks)));
+  });
+}
 
 // Route pour lister les fichiers locaux
-app.get('/api/local-files', (req, res) => {
+app.get('/api/files', (req, res) => {
   try {
-    fs.readdir(S3BUCKET_DIR, (err, files) => {
+    fs.readdir(FILES_DIR, (err, files) => {
       if (err) {
-        console.error('Erreur lecture dossier:', err);
-        return res.status(500).json({ error: 'Erreur de lecture du dossier' });
+        console.error('Error reading directory:', err);
+        return res.status(500).json({ error: 'Unable to scan directory' });
       }
 
-      const validFiles = files.filter(file => 
-        /\.(pdf|jpg|jpeg|png)$/i.test(file)
-      );
-
-      const fileDetails = validFiles.map(file => {
-        const filePath = path.join(S3BUCKET_DIR, file);
-        const stat = fs.statSync(filePath);
-        return {
-          name: file,
-          lastModified: stat.mtime.toISOString(),
-          size: stat.size,
-          type: file.endsWith('.pdf') ? 'pdf' : 'image'
-        };
-      });
+      const fileDetails = files
+        .filter(file => /\.(pdf|jpg|jpeg|png)$/i.test(file))
+        .map(file => {
+          const filePath = path.join(FILES_DIR, file);
+          const stats = fs.statSync(filePath);
+          
+          return {
+            name: file,
+            path: `/s3bucket/${file}`,
+            type: path.extname(file).substring(1).toLowerCase(),
+            size: stats.size,
+            lastModified: stats.mtime,
+            date: stats.mtime.toISOString().split('T')[0]
+          };
+        });
 
       res.json(fileDetails);
     });
   } catch (error) {
-    console.error('Erreur:', error);
-    res.status(500).json({ error: 'Erreur serveur' });
+    console.error('Server error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Route pour uploader des fichiers
-app.post('/api/upload', (req, res) => {
-  // Implémentation à ajouter si nécessaire
-  res.status(501).json({ message: 'Endpoint à implémenter' });
-});
-
-// Gestion des factures (existante)
-app.post('/api/invoices', (req, res) => {
+// Route pour générer une URL signée (exemple)
+app.get('/api/signed-url', async (req, res) => {
   try {
-    if (!req.body.invoiceNumber) {
-      return res.status(400).json({ error: 'Le numéro de facture est requis' });
+    const { key } = req.query;
+    if (!key) {
+      return res.status(400).json({ error: 'Key parameter is required' });
     }
 
-    const invoiceData = {
-      ...req.body,
-      submittedAt: new Date().toISOString(),
-      status: 'pending_verification'
-    };
-
-    const fileName = `invoice_${invoiceData.invoiceNumber}_${Date.now()}.json`;
-    fs.writeFileSync(path.join(DATA_DIR, fileName), JSON.stringify(invoiceData, null, 2));
-
-    res.status(201).json({
-      message: 'Facture enregistrée avec succès',
-      invoiceId: fileName.replace('.json', '')
+    const command = new GetObjectCommand({
+      Bucket: 'photonasync-datcorp',
+      Key: key
     });
+
+    const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+    res.json({ url });
   } catch (error) {
-    console.error('Erreur:', error);
-    res.status(500).json({ error: 'Erreur serveur' });
+    console.error('Error generating signed URL:', error);
+    res.status(500).json({ error: 'Failed to generate URL' });
   }
 });
 
-// Route pour la vérification (accès réservé)
-app.get('/api/invoices/:id', (req, res) => {
-  try {
-    const filePath = path.join(DATA_DIR, `${req.params.id}.json`);
-    if (fs.existsSync(filePath)) {
-      const data = JSON.parse(fs.readFileSync(filePath));
-      res.json(data);
-    } else {
-      res.status(404).json({ error: 'Facture non trouvée' });
-    }
-  } catch (error) {
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
-});
-
-// Gestion des erreurs 404
-app.use((req, res) => {
-  res.status(404).json({ error: 'Endpoint non trouvé' });
-});
-
-// Gestion des erreurs globales
-app.use((err, req, res, next) => {
-  console.error('Erreur globale:', err.stack);
-  res.status(500).json({ error: 'Erreur serveur interne' });
-});
+// Servir les fichiers statiques
+app.use('/s3bucket', express.static(FILES_DIR));
 
 // Démarrer le serveur
 app.listen(PORT, () => {
-  console.log(`Serveur backend en cours d'exécution sur http://localhost:${PORT}`);
-  console.log(`Dossier S3Bucket: ${S3BUCKET_DIR}`);
+  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`S3 files directory: ${FILES_DIR}`);
+  console.log('AWS SDK v3 is being used');
 });

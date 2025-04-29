@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import AWS from 'aws-sdk';
 import './MainPage.css';
 
 const MainPage = () => {
@@ -8,166 +7,67 @@ const MainPage = () => {
   const [files, setFiles] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [processedFiles, setProcessedFiles] = useState([]);
   const [availableDates, setAvailableDates] = useState(['Toutes les dates']);
   const [selectedDate, setSelectedDate] = useState('Toutes les dates');
-  const [localFiles, setLocalFiles] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-     
-  const s3 = new AWS.S3({
-    accessKeyId: process.env.REACT_APP_AWS_ACCESS_KEY,
-    secretAccessKey: process.env.REACT_APP_AWS_SECRET_KEY,
-    region: process.env.REACT_APP_AWS_REGION,
-    signatureVersion: 'v4'
-  });
-
-  const loadRealLocalFiles = async () => {
-    try {
-      // Solution 1: Pour développement avec Create React App (fichiers dans public/s3bucket)
-     /* const response = await fetch('/s3bucket/list.json'); // Créez ce fichier manuellement
-      const files = await response.json();
-      */
-      // Solution 2: Pour Electron ou environnement Node.js (accès direct au filesystem)
-       
-      const fs = window.require('fs');
-      const path = window.require('path');
-      const files = fs.readdirSync('C:/s3bucket')
-        .filter(name => name.match(/\.(pdf|jpg|jpeg|png)$/i))
-        .map(name => ({
-          key: `local_${name}`,
-          name,
-          date: new Date().toISOString().split('T')[0],
-          type: name.endsWith('.pdf') ? 'pdf' : 'image',
-          local: true,
-          url: `/s3bucket/${name}`
-        }));
-      
-      
-      setLocalFiles(files);
-    } catch (error) {
-      console.error("Erreur lecture fichiers locaux:", error);
-      // Fallback aux fichiers mock
-      setLocalFiles([
-        { 
-          key: 'local_1.pdf', 
-          name: 'facture.pdf', 
-          date: '2025-01-15', 
-          type: 'pdf', 
-          local: true,
-          url: '/s3bucket/facture.pdf'
-        }
-      ]);
-    }
-  };
-
   useEffect(() => {
-    loadRealLocalFiles();
-    const savedProcessedFiles = JSON.parse(localStorage.getItem('processedFiles')) || [];
-    setProcessedFiles(savedProcessedFiles);
-    loadLocalFiles();
-    loadS3Files(); // Conserver pour compatibilité
+    const fetchFiles = async () => {
+      try {
+        const response = await fetch('http://localhost:5000/api/files');
+        if (!response.ok) throw new Error('Network response was not ok');
+        
+        const data = await response.json();
+        const formattedFiles = data.map(file => ({
+          key: `file_${file.name}_${file.lastModified}`,
+          name: file.name,
+          date: file.date,
+          type: file.type === 'pdf' ? 'pdf' : 'image',
+          local: true,
+          url: file.path,
+          lastModified: new Date(file.lastModified)
+        }));
+
+        setFiles(formattedFiles);
+        
+        // Extraire les dates uniques
+        const uniqueDates = [...new Set(formattedFiles.map(file => file.date))];
+        setAvailableDates(['Toutes les dates', ...uniqueDates]);
+        
+      } catch (err) {
+        setError(`Failed to load files: ${err.message}`);
+        console.error('Error fetching files:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchFiles();
   }, []);
 
-  const loadLocalFiles = async () => {
+  const handleFileUpload = async (e) => {
+    const filesToUpload = Array.from(e.target.files);
+    
     try {
-      // Simuler la lecture du dossier local C:\s3bucket
-      const mockLocalFiles = [
-        { 
-          key: 'local_1.pdf', 
-          name: '9df88234-dd1e-4db3-b7c1-d20c0610817b.pdf', 
-          date: '2025-01-15', 
-          type: 'pdf', 
-          local: true,
-          url: '/s3bucket/9df88234-dd1e-4db3-b7c1-d20c0610817b.pdf' // Chemin relatif public
-        },
-        { 
-          key: 'local_2.jpg', 
-          name: 'image_2025_03_18T08_02_44_823Z.png', 
-          date: '2025-01-16', 
-          type: 'image', 
-          local: true,
-          url: '/s3bucket/image_2025_03_18T08_02_44_823Z.png'
-        },
-        // Ajoutez d'autres fichiers de test selon besoin
-      ];
-      setLocalFiles(mockLocalFiles);
-      updateAvailableDates(mockLocalFiles);
-    } catch (error) {
-      console.error("Erreur chargement local:", error);
+      const uploadPromises = filesToUpload.map(async (file) => {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch('http://localhost:5000/api/upload', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) throw new Error('Upload failed');
+        return response.json();
+      });
+
+      await Promise.all(uploadPromises);
+      // Recharger la liste après upload
+      window.location.reload();
+    } catch (err) {
+      setError(`Upload error: ${err.message}`);
     }
-  };
-  const loadS3Files = async () => {
-    try {
-      if (process.env.REACT_APP_USE_S3 === 'false') {
-        setIsLoading(false);
-        return;
-      }
-  
-      const dateFolders = await s3.listObjectsV2({
-        Bucket: 'photonasync-datcorp',
-        Prefix: 'data/768327198/',
-        Delimiter: '/'
-      }).promise();
-  
-      const dates = dateFolders.CommonPrefixes.map(folder => {
-        const parts = folder.Prefix.split('/');
-        return parts[parts.length - 2];
-      }).filter(Boolean);
-  
-      setAvailableDates(prev => [...new Set([...prev, ...dates])]);
-  
-      const s3Files = await Promise.all(
-        dateFolders.CommonPrefixes.flatMap(async folder => {
-          const filesData = await s3.listObjectsV2({
-            Bucket: 'photonasync-datcorp',
-            Prefix: folder.Prefix
-          }).promise();
-  
-          return filesData.Contents
-            .filter(item => item.Key.match(/\.(pdf|jpg|jpeg|png)$/i))
-            .map(item => ({
-              key: item.Key,
-              name: item.Key.split('/').pop(),
-              date: folder.Prefix.split('/').slice(-2)[0],
-              type: item.Key.endsWith('.pdf') ? 'pdf' : 'image',
-              local: false,
-              url: s3.getSignedUrl('getObject', {
-                Bucket: 'photonasync-datcorp',
-                Key: item.Key,
-                Expires: 3600
-              })
-            }));
-        })
-      );
-  
-      setFiles(s3Files.flat());
-    } catch (error) {
-      console.error("Erreur S3:", error);
-      setFiles([]); // Retourner un tableau vide en cas d'erreur
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const updateAvailableDates = (newFiles) => {
-    const newDates = newFiles.map(file => file.date);
-    setAvailableDates(prev => [...new Set([...prev, ...newDates])]);
-  };
-
-  const handleFileUpload = (e) => {
-    const uploadedFiles = Array.from(e.target.files).map(file => ({
-      key: `local_${Date.now()}_${file.name}`,
-      name: file.name,
-      date: new Date().toISOString().split('T')[0],
-      type: file.type.includes('pdf') ? 'pdf' : 'image',
-      local: true,
-      url: URL.createObjectURL(file) // Crée une URL locale
-    }));
-
-    setLocalFiles(prev => [...prev, ...uploadedFiles]);
-    updateAvailableDates(uploadedFiles);
   };
 
   const handleStartWork = () => {
@@ -176,25 +76,30 @@ const MainPage = () => {
         state: { 
           selectedFile: {
             ...selectedFile,
-            // Assurez-vous que ces champs existent
+            type: selectedFile.type,
             name: selectedFile.name,
-            url: selectedFile.local 
-              ? selectedFile.url 
-              : s3.getSignedUrl('getObject', {
-                  Bucket: 'photonasync-datcorp',
-                  Key: selectedFile.key,
-                  Expires: 3600
-                }),
-            type: selectedFile.type
+            url: selectedFile.url
           }
         } 
       });
     }
   };
 
-  const filteredFiles = [...files, ...localFiles]
+  const filteredFiles = files
     .filter(file => selectedDate === 'Toutes les dates' || file.date === selectedDate)
-    .sort((a, b) => new Date(b.date) - new Date(a.date));
+    .sort((a, b) => b.lastModified - a.lastModified);
+
+  if (error) {
+    return (
+      <div className="photen-container">
+        <div className="error-message">
+          <h2>Error</h2>
+          <p>{error}</p>
+          <button onClick={() => window.location.reload()}>Try Again</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="photen-container">
@@ -202,7 +107,7 @@ const MainPage = () => {
         <h1>PHOTEN</h1>
         
         <div className="file-controls">
-          <h2>Filename</h2>
+          <h2>Files</h2>
           <select 
             value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}
@@ -215,7 +120,7 @@ const MainPage = () => {
         </div>
 
         <label className="upload-local-btn">
-          Ajouter fichiers locaux
+          Add Local Files
           <input 
             type="file" 
             multiple 
@@ -226,25 +131,36 @@ const MainPage = () => {
         </label>
 
         {isLoading ? (
-          <p>Chargement...</p>
+          <div className="loading-spinner">
+            <p>Loading files...</p>
+          </div>
         ) : (
           <div className="file-list-container">
-            {filteredFiles.map((file) => (
-              <div 
-                key={file.key}
-                className={`file-item ${selectedFile?.key === file.key ? 'selected' : ''} ${processedFiles.includes(file.key) ? 'processed' : ''}`}
-                onClick={() => setSelectedFile(file)}
-              >
-                <div className="file-info">
-                  <span className="file-name">{file.name}</span>
-                  <div className="file-meta">
-                    <span className="file-date">{file.date}</span>
-                    <span className={`file-type ${file.type}`}>{file.type}</span>
-                    {file.local && <span className="local-badge">Local</span>}
+            {filteredFiles.length === 0 ? (
+              <div className="no-files">
+                <p>No files found</p>
+                <p>Upload files or check your server connection</p>
+              </div>
+            ) : (
+              filteredFiles.map((file) => (
+                <div 
+                  key={file.key}
+                  className={`file-item ${selectedFile?.key === file.key ? 'selected' : ''}`}
+                  onClick={() => setSelectedFile(file)}
+                >
+                  <div className="file-info">
+                    <span className="file-name">{file.name}</span>
+                    <div className="file-meta">
+                      <span className="file-date">{file.date}</span>
+                      <span className={`file-type ${file.type}`}>
+                        {file.type.toUpperCase()}
+                      </span>
+                      <span className="local-badge">LOCAL</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         )}
       </div>
@@ -262,9 +178,21 @@ const MainPage = () => {
           <button className="secondary-button">Export</button>
         </div>
         
-        <div className="upload-section">
-          <h2>Uploaded Ad (PT)</h2>
-          {/* Timestamps ici */}
+        <div className="file-preview">
+          {selectedFile ? (
+            <>
+              <h2>{selectedFile.name}</h2>
+              <div className="file-details">
+                <p><strong>Type:</strong> {selectedFile.type}</p>
+                <p><strong>Date:</strong> {selectedFile.date}</p>
+                <p><strong>Source:</strong> Local</p>
+              </div>
+            </>
+          ) : (
+            <div className="no-selection">
+              <p>Select a file to view details</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
